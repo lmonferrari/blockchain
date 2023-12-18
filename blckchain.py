@@ -111,4 +111,4 @@ if __name__ == '__main__':
             "is_valid": bc.is_chain_valid(bc.chain)
         }), 200
 
-    app.run()
+    app.run(port=5001)
