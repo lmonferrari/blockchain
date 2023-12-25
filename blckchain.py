@@ -1,5 +1,3 @@
-# blockchain geral
-
 import datetime
 import hashlib
 from multiprocessing import Process
@@ -16,16 +14,23 @@ from moeda.criptomoeda import Transaction
 class Blockchain:
     def __init__(self):
         self.chain = []
+        self.current_transactions = []
         self.create_block(proof=1, prev_hash="0", data="Genesis Block")
         self.nodes = set()
 
+    def add_transaction_to_pool(self, sender, receiver, amount):
+        self.current_transactions.append(Transaction(sender, receiver, amount))
+
     def create_block(self, proof, prev_hash, data):
         block = Block(
-            proof,
-            prev_hash,
-            datetime.datetime.now(),
-            data,
+            index=len(self.chain) + 1,
+            proof=proof,
+            prev_hash=prev_hash,
+            timestamp=datetime.datetime.now(),
+            data=data,
+            transactions=self.current_transactions,
         )
+        self.current_transactions = []
         self.chain.append(block)
 
         return block
@@ -33,22 +38,17 @@ class Blockchain:
     def get_prev_block(self):
         return self.chain[-1]
 
-    def get_current_block(self):
-        return self.chain[-1]
-
     def proof_of_work(self, prev_proof):
         new_proof = 1
-        check_proof = False
-        while check_proof is False:
-            hash_operation = hashlib.sha256(
-                f"{new_proof**2 - prev_proof**2}".encode()
-            ).hexdigest()
-            if hash_operation[:4] == "0000":
-                check_proof = True
-            else:
-                new_proof += 1
-
+        while not self.valid_proof(prev_proof, new_proof):
+            new_proof += 1
         return new_proof
+
+    @staticmethod
+    def valid_proof(prev_proof, new_proof):
+        guess = f"{new_proof**2 - prev_proof**2}".encode()
+        guess_hash = hashlib.sha256(guess).hexdigest()
+        return guess_hash[:4] == "0000"
 
     def is_chain_valid(self, chain):
         prev_block = chain[0]
@@ -96,10 +96,10 @@ class Blockchain:
         longest_chain = self.get_longest_chain()
 
         if longest_chain:
-            updated_chain = [
-                Block.from_json(block_data) for block_data in longest_chain
-            ]
+            updated_chain = [Block.from_json(b) for b in longest_chain]
+
             self.chain = updated_chain
+
             return True
         return False
 
@@ -113,29 +113,19 @@ class Blockchain:
 
 
 class Block:
-    index = -1
-
-    def __init__(self, proof, prev_hash, timestamp, data):
-        Block.index += 1
-        self.index = Block.index
-        self.transactions = []
+    def __init__(self, index, proof, prev_hash, timestamp, data, transactions):
+        self.index = index
+        self.transactions = transactions
         self.proof = proof
-        self.hash = hashlib.sha256(
-            f"{self.index}{self.proof}{prev_hash}{data}".encode()
-        ).hexdigest()
+        self.hash = self.calc_hash(prev_hash, data)
         self.prev_hash = prev_hash
         self.timestamp = timestamp
         self.data = data
 
-    def add_transaction(self, sender, receiver, amount):
-        self.transactions.append(
-            Transaction(
-                sender,
-                receiver,
-                amount,
-            )
-        )
-        return self.index + 1
+    def calc_hash(self, prev_hash, data):
+        return hashlib.sha256(
+            f"{self.index}{self.proof}{prev_hash}{data}".encode()
+        ).hexdigest()
 
     def to_json(self):
         return {
@@ -149,14 +139,18 @@ class Block:
         }
 
     @classmethod
-    def from_json(cls, json_block):
+    def from_json(cls, js):
+        transactions = [Transaction.from_json(t) for t in js.get("transactions", [])]
+
         return cls(
-            proof=json_block["proof"],
-            prev_hash=json_block["prev_hash"],
+            index=js["index"],
+            proof=js["proof"],
+            prev_hash=js["prev_hash"],
             timestamp=datetime.datetime.strptime(
-                json_block["timestamp"], "%Y-%m-%d %H:%M:%S.%f"
+                js["timestamp"], "%Y-%m-%d %H:%M:%S.%f"
             ),
-            data=json_block["data"],
+            data=js["data"],
+            transactions=transactions,
         )
 
 
@@ -208,12 +202,12 @@ def create_app(config_filename=None):
             return json.dumps({"message": "Missing transaction keys"}), 400
 
         json_file["sender"] = node_address
-        json_file["timestamp"] = datetime.datetime.now()
 
-        # como o bloco já foi criado, eu pego o bloco atual
-        # e adiciono a transação nele
-        current_block = bc.get_current_block()
-        current_block.add_transaction(**json_file)
+        bc.add_transaction_to_pool(
+            json_file["sender"],
+            json_file["receiver"],
+            json_file["amount"],
+        )
 
         return (
             json.dumps(

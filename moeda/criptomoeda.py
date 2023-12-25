@@ -29,3 +29,11 @@ class Transaction:
             "amount": self.amount,
             "timestamp": self.timestamp.strftime("%d/%m/%Y, %H:%M:%S"),
         }
+
+    @classmethod
+    def from_json(cls, js_t):
+        return cls(
+            sender=js_t["sender"],
+            receiver=js_t["receiver"],
+            amount=js_t["amount"],
+        )
