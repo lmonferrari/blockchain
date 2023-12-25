@@ -33,6 +33,9 @@ class Blockchain:
     def get_prev_block(self):
         return self.chain[-1]
 
+    def get_current_block(self):
+        return self.chain[-1]
+
     def proof_of_work(self, prev_proof):
         new_proof = 1
         check_proof = False
@@ -79,11 +82,11 @@ class Blockchain:
         max_length = len(self.chain)
 
         for node in network:
-            request - requests.get(f"{node}/get_chain")
-            if request.status == 200:
+            request = requests.get(f"http://{node}/get_chain")
+            if request.status_code == 200:
                 length = request.json()["length"]
                 chain = request.json()["chain"]
-                if length > max_length and self.is_chain_valid(chain):
+                if length > max_length:
                     max_length = length
                     longest_chain = chain
 
@@ -91,8 +94,12 @@ class Blockchain:
 
     def replace_chain(self):
         longest_chain = self.get_longest_chain()
+
         if longest_chain:
-            self.chain = longest_chain
+            updated_chain = [
+                Block.from_json(block_data) for block_data in longest_chain
+            ]
+            self.chain = updated_chain
             return True
         return False
 
@@ -102,7 +109,7 @@ class Blockchain:
             "length": len(self.chain),
             "nodes": list(self.nodes),
         }
-        return json.dumps(blockchain_data, indent=4)
+        return blockchain_data
 
 
 class Block:
@@ -120,7 +127,6 @@ class Block:
         self.timestamp = timestamp
         self.data = data
 
-    @classmethod
     def add_transaction(self, sender, receiver, amount):
         self.transactions.append(
             Transaction(
@@ -141,6 +147,17 @@ class Block:
             "data": self.data,
             "transactions": [t.to_json() for t in self.transactions],
         }
+
+    @classmethod
+    def from_json(cls, json_block):
+        return cls(
+            proof=json_block["proof"],
+            prev_hash=json_block["prev_hash"],
+            timestamp=datetime.datetime.strptime(
+                json_block["timestamp"], "%Y-%m-%d %H:%M:%S.%f"
+            ),
+            data=json_block["data"],
+        )
 
 
 def create_app(config_filename=None):
@@ -188,9 +205,15 @@ def create_app(config_filename=None):
         json_file = request.get_json()
         transaction_keys = ["sender", "receiver", "amount"]
         if not any(key in json_file for key in transaction_keys):
-            return "Missing transaction keys", 400
+            return json.dumps({"message": "Missing transaction keys"}), 400
 
-        Block.add_transaction(**json_file)
+        json_file["sender"] = node_address
+        json_file["timestamp"] = datetime.datetime.now()
+
+        # como o bloco já foi criado, eu pego o bloco atual
+        # e adiciono a transação nele
+        current_block = bc.get_current_block()
+        current_block.add_transaction(**json_file)
 
         return (
             json.dumps(
@@ -227,15 +250,12 @@ def create_app(config_filename=None):
                 json.dumps(
                     {
                         "message": "Chain replaced",
-                        "new_chain": bc.to_json(),
                     }
                 ),
                 200,
             )
         return (
-            json.dumps(
-                {"message": "Chain not replaced"},
-            ),
+            json.dumps({"message": "Chain not replaced"}),
             200,
         )
 
@@ -254,7 +274,7 @@ def run_app(port):
 
 
 if __name__ == "__main__":
-    ports = [5010, 5011, 5012, 5013]
+    ports = [5010, 5011, 5012]
     processes = []
 
     for port in ports:
